@@ -1,7 +1,9 @@
 name: Build Hilton High School Windows App
 
-on:
-  workflow_dispatch:
+"on": workflow_dispatch
+
+permissions:
+  contents: read
 
 jobs:
   build-windows:
@@ -22,6 +24,40 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install PyMuPDF Pillow openpyxl python-docx pyinstaller
 
+      - name: Locate application files
+        id: locate
+        shell: pwsh
+        run: |
+          $app = Get-ChildItem `
+            -Path $env:GITHUB_WORKSPACE `
+            -Filter "report_splitter_1788075570331.py" `
+            -File `
+            -Recurse |
+            Where-Object { $_.FullName -notmatch "\\.git\\" } |
+            Select-Object -First 1
+
+          $ui = Get-ChildItem `
+            -Path $env:GITHUB_WORKSPACE `
+            -Filter "hilton_ui.py" `
+            -File `
+            -Recurse |
+            Where-Object { $_.FullName -notmatch "\\.git\\" } |
+            Select-Object -First 1
+
+          if ($null -eq $app) {
+            throw "Could not find report_splitter_1788075570331.py"
+          }
+
+          if ($null -eq $ui) {
+            throw "Could not find hilton_ui.py"
+          }
+
+          "app=$($app.FullName)" >> $env:GITHUB_OUTPUT
+          "ui_folder=$($ui.DirectoryName)" >> $env:GITHUB_OUTPUT
+
+          Write-Host "Application: $($app.FullName)"
+          Write-Host "UI module folder: $($ui.DirectoryName)"
+
       - name: Build executable
         shell: pwsh
         run: |
@@ -31,11 +67,12 @@ jobs:
             --onefile `
             --windowed `
             --name "Hilton High School" `
+            --paths "${{ steps.locate.outputs.ui_folder }}" `
             --hidden-import hilton_ui `
-            report_splitter_1788075570331.py
+            "${{ steps.locate.outputs.app }}"
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: Hilton-High-School-Windows
-          path: dist/Hilton High School.exe
+          path: "dist/Hilton High School.exe"
