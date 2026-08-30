@@ -1,12 +1,6 @@
 name: Build Hilton High School Windows App
 
-on:
-  workflow_dispatch:
-  push:
-    paths:
-      - "report_splitter.py"
-      - ".github/workflows/build-windows.yml"
-      - "hilton_ui.py"
+"on": workflow_dispatch
 
 permissions:
   contents: read
@@ -25,44 +19,56 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install PyMuPDF Pillow openpyxl python-docx pyinstaller
 
-      - name: Locate application files
-        id: locate
+      - name: Find application files
+        id: files
         shell: pwsh
         run: |
-          $app = Get-ChildItem `
-            -Path $env:GITHUB_WORKSPACE `
-            -Filter "report_splitter_1788075570331.py" `
-            -File `
-            -Recurse |
-            Where-Object { $_.FullName -notmatch "\\.git\\" } |
+          $appCandidates = @(
+            "report_splitter_1788075570331.py",
+            "assets\report_splitter_1788075570331.py",
+            "attached_assets\report_splitter_1788075570331.py"
+          )
+
+          $uiCandidates = @(
+            "hilton_ui.py",
+            "assets\hilton_ui.py",
+            "attached_assets\hilton_ui.py"
+          )
+
+          $app = $appCandidates |
+            Where-Object { Test-Path $_ } |
             Select-Object -First 1
 
-          $ui = Get-ChildItem `
-            -Path $env:GITHUB_WORKSPACE `
-            -Filter "hilton_ui.py" `
-            -File `
-            -Recurse |
-            Where-Object { $_.FullName -notmatch "\\.git\\" } |
+          $ui = $uiCandidates |
+            Where-Object { Test-Path $_ } |
             Select-Object -First 1
 
-          if ($null -eq $app) {
-            throw "Could not find report_splitter_1788075570331.py"
+          if (-not $app) {
+            Write-Host "Repository contents:"
+            Get-ChildItem -Path . -Recurse -File |
+              Select-Object FullName
+            throw "report_splitter_1788075570331.py was not found."
           }
 
-          if ($null -eq $ui) {
-            throw "Could not find hilton_ui.py"
+          if (-not $ui) {
+            throw "hilton_ui.py was not found."
           }
 
-          "app=$($app.FullName)" >> $env:GITHUB_OUTPUT
-          "ui_folder=$($ui.DirectoryName)" >> $env:GITHUB_OUTPUT
+          $uiFolder = Split-Path -Parent $ui
 
-          Write-Host "Application: $($app.FullName)"
-          Write-Host "UI module folder: $($ui.DirectoryName)"
+          if (-not $uiFolder) {
+            $uiFolder = "."
+          }
+
+          "app=$app" >> $env:GITHUB_OUTPUT
+          "ui_folder=$uiFolder" >> $env:GITHUB_OUTPUT
+
+          Write-Host "Using application: $app"
+          Write-Host "Using UI module folder: $uiFolder"
 
       - name: Build executable
         shell: pwsh
@@ -73,9 +79,16 @@ jobs:
             --onefile `
             --windowed `
             --name "Hilton High School" `
-            --paths "${{ steps.locate.outputs.ui_folder }}" `
+            --paths "${{ steps.files.outputs.ui_folder }}" `
             --hidden-import hilton_ui `
-            "${{ steps.locate.outputs.app }}"
+            "${{ steps.files.outputs.app }}"
+
+          if (-not (Test-Path "dist\Hilton High School.exe")) {
+            Write-Host "Build output:"
+            Get-ChildItem -Path . -Recurse -File |
+              Select-Object FullName
+            throw "PyInstaller did not create the executable."
+          }
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
