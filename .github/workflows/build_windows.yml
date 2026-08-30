@@ -1,6 +1,12 @@
 name: Build Hilton High School Windows App
 
-"on": workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "report_splitter.py"
+      - ".github/workflows/build-windows.yml"
+      - "hilton_ui.py"
 
 permissions:
   contents: read
