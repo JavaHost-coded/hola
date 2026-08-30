@@ -19,56 +19,85 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install PyMuPDF Pillow openpyxl python-docx pyinstaller
 
-      - name: Find application files
+      - name: Locate application files
         id: files
         shell: pwsh
         run: |
-          $appCandidates = @(
+          $allPythonFiles = Get-ChildItem `
+            -Path $env:GITHUB_WORKSPACE `
+            -Recurse `
+            -File `
+            -Filter "*.py" |
+            Where-Object {
+              $_.FullName -notmatch "\\.git\\" -and
+              $_.Name -ne "hilton_ui.py"
+            }
+
+          $preferredNames = @(
+            "report_splitter.py",
             "report_splitter_1788075570331.py",
-            "assets\report_splitter_1788075570331.py",
-            "attached_assets\report_splitter_1788075570331.py"
+            "main.py",
+            "app.py"
           )
 
-          $uiCandidates = @(
-            "hilton_ui.py",
-            "assets\hilton_ui.py",
-            "attached_assets\hilton_ui.py"
-          )
+          $app = $null
 
-          $app = $appCandidates |
-            Where-Object { Test-Path $_ } |
-            Select-Object -First 1
+          foreach ($name in $preferredNames) {
+            $match = $allPythonFiles |
+              Where-Object { $_.Name -eq $name } |
+              Select-Object -First 1
 
-          $ui = $uiCandidates |
-            Where-Object { Test-Path $_ } |
+            if ($match) {
+              $app = $match
+              break
+            }
+          }
+
+          if (-not $app) {
+            $app = $allPythonFiles |
+              Where-Object {
+                $_.Name -match "report|splitter|hilton"
+              } |
+              Select-Object -First 1
+          }
+
+          $ui = Get-ChildItem `
+            -Path $env:GITHUB_WORKSPACE `
+            -Recurse `
+            -File `
+            -Filter "hilton_ui.py" |
+            Where-Object {
+              $_.FullName -notmatch "\\.git\\"
+            } |
             Select-Object -First 1
 
           if (-not $app) {
-            Write-Host "Repository contents:"
-            Get-ChildItem -Path . -Recurse -File |
-              Select-Object FullName
-            throw "report_splitter_1788075570331.py was not found."
+            Write-Host "No application Python file was found."
+            Write-Host "Python files found:"
+            $allPythonFiles | ForEach-Object {
+              Write-Host $_.FullName
+            }
+
+            throw "Upload and commit the application Python file to the GitHub repository."
           }
 
           if (-not $ui) {
-            throw "hilton_ui.py was not found."
+            throw "hilton_ui.py was not found in the GitHub repository."
           }
 
-          $uiFolder = Split-Path -Parent $ui
+          $appPath = $app.FullName
+          $uiFolder = $ui.DirectoryName
 
-          if (-not $uiFolder) {
-            $uiFolder = "."
-          }
-
-          "app=$app" >> $env:GITHUB_OUTPUT
+          "app_path=$appPath" >> $env:GITHUB_OUTPUT
           "ui_folder=$uiFolder" >> $env:GITHUB_OUTPUT
 
-          Write-Host "Using application: $app"
-          Write-Host "Using UI module folder: $uiFolder"
+          Write-Host "Application file: $appPath"
+          Write-Host "UI module folder: $uiFolder"
 
       - name: Build executable
         shell: pwsh
@@ -81,12 +110,13 @@ jobs:
             --name "Hilton High School" `
             --paths "${{ steps.files.outputs.ui_folder }}" `
             --hidden-import hilton_ui `
-            "${{ steps.files.outputs.app }}"
+            "${{ steps.files.outputs.app_path }}"
 
           if (-not (Test-Path "dist\Hilton High School.exe")) {
             Write-Host "Build output:"
             Get-ChildItem -Path . -Recurse -File |
               Select-Object FullName
+
             throw "PyInstaller did not create the executable."
           }
 
