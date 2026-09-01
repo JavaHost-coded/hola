@@ -1,0 +1,118 @@
+name: Build Hilton High School Windows App
+
+"on": workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyMuPDF Pillow openpyxl python-docx pyinstaller
+
+      - name: Find application files
+        id: files
+        shell: pwsh
+        run: |
+          $allPythonFiles = Get-ChildItem `
+            -Path $env:GITHUB_WORKSPACE `
+            -Recurse `
+            -File `
+            -Filter "*.py" |
+            Where-Object {
+              $_.FullName -notmatch "\\.git\\" -and
+              $_.Name -ne "hilton_ui.py"
+            }
+
+          $preferredNames = @(
+            "report_splitter.py",
+            "report_splitter_1788075570331.py",
+            "main.py",
+            "app.py"
+          )
+
+          $app = $null
+          foreach ($name in $preferredNames) {
+            $match = $allPythonFiles |
+              Where-Object { $_.Name -eq $name } |
+              Select-Object -First 1
+            if ($match) {
+              $app = $match
+              break
+            }
+          }
+
+          if (-not $app) {
+            $app = $allPythonFiles |
+              Where-Object { $_.Name -match "report|splitter|hilton" } |
+              Select-Object -First 1
+          }
+
+          $ui = Get-ChildItem `
+            -Path $env:GITHUB_WORKSPACE `
+            -Recurse `
+            -File `
+            -Filter "hilton_ui.py" |
+            Where-Object {
+              $_.FullName -notmatch "\\.git\\"
+            } |
+            Select-Object -First 1
+
+          if (-not $app) {
+            Write-Host "No application Python file was found."
+            Write-Host "Python files found:"
+            $allPythonFiles | ForEach-Object {
+              Write-Host $_.FullName
+            }
+            throw "Upload and commit the application Python file to the GitHub repository."
+          }
+
+          if (-not $ui) {
+            throw "hilton_ui.py was not found."
+          }
+
+          $appPath = $app.FullName
+          $uiFolder = $ui.DirectoryName
+
+          "app_path=$appPath" >> $env:GITHUB_OUTPUT
+          "ui_folder=$uiFolder" >> $env:GITHUB_OUTPUT
+          Write-Host "Using application: $appPath"
+          Write-Host "Using UI module folder: $uiFolder"
+
+      - name: Build executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --windowed `
+            --name "Hilton High School" `
+            --paths "${{ steps.files.outputs.ui_folder }}" `
+            --hidden-import hilton_ui `
+            "${{ steps.files.outputs.app_path }}"
+
+          if (-not (Test-Path "dist\Hilton High School.exe")) {
+            Write-Host "Build output:"
+            Get-ChildItem -Path . -Recurse -File | Select-Object FullName
+            throw "PyInstaller did not create dist\Hilton High School.exe."
+          }
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hilton-High-School-Windows
+          path: "dist/Hilton High School.exe"
